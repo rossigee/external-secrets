@@ -2,6 +2,7 @@
 /webhook/bin
 /webhook/certcontroller/bin
 /bin
+/external-secrets
 /cmd/esoctl/bin
 /cmd/esoctl/dist
 /vendor

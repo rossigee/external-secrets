@@ -19,10 +19,9 @@ package vault
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/go-logr/logr"
 	vault "github.com/hashicorp/vault/api"
@@ -56,7 +55,6 @@ func (c *client) newConfig(ctx context.Context) (*vault.Config, error) {
 	cfg.Address = c.store.Server
 
 	if len(c.store.CABundle) != 0 || c.store.CAProvider != nil {
-		caCertPool := x509.NewCertPool()
 		ca, err := utils.FetchCACertFromSource(ctx, utils.CreateCertOpts{
 			CABundle:   c.store.CABundle,
 			CAProvider: c.store.CAProvider,
@@ -67,13 +65,23 @@ func (c *client) newConfig(ctx context.Context) (*vault.Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		ok := caCertPool.AppendCertsFromPEM(ca)
-		if !ok {
-			return nil, fmt.Errorf(errVaultCert, errors.New("failed to parse certificates from CertPool"))
+
+		// Parse server URL to extract hostname for TLS ServerName
+		var tlsServerName string
+		if serverURL, err := url.Parse(c.store.Server); err == nil && serverURL.Hostname() != "" {
+			tlsServerName = serverURL.Hostname()
 		}
 
-		if transport, ok := cfg.HttpClient.Transport.(*http.Transport); ok {
-			transport.TLSClientConfig.RootCAs = caCertPool
+		// Use Vault's ConfigureTLS method to properly set CA certificates and ServerName
+		// This ensures TLS certificate validation works correctly when using custom CAs
+		tlsConfig := &vault.TLSConfig{
+			CACertBytes:   ca,
+			TLSServerName: tlsServerName,
+		}
+		
+		err = cfg.ConfigureTLS(tlsConfig)
+		if err != nil {
+			return nil, err
 		}
 	}
 
