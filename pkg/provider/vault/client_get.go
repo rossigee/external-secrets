@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"strings"
 
-	vault "github.com/hashicorp/vault/api"
 	"github.com/tidwall/gjson"
 
 	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
@@ -42,24 +41,6 @@ const (
 	errSecretKeyFmt                 = "cannot find secret data for key: %q"
 )
 
-// isVaultMissingSecretError checks if the error from Vault indicates a missing secret
-// (403 Forbidden or 404 Not Found) which should be treated as NoSecretError to
-// prevent authentication storms caused by immediate retries
-func isVaultMissingSecretError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check if this is a Vault ResponseError (HTTP error)
-	var respErr *vault.ResponseError
-	if errors.As(err, &respErr) {
-		// 403 Forbidden: Path not allowed or secret doesn't exist
-		// 404 Not Found: Path doesn't exist
-		return respErr.StatusCode == 403 || respErr.StatusCode == 404
-	}
-
-	return false
-}
 
 // GetSecret supports two types:
 //  1. get the full secret as json-encoded value
@@ -153,10 +134,6 @@ func (c *client) readSecret(ctx context.Context, path, version string) (map[stri
 	vaultSecret, err := c.logical.ReadWithDataWithContext(ctx, dataPath, params)
 	metrics.ObserveAPICall(constants.ProviderHCVault, constants.CallHCVaultReadSecretData, err)
 	if err != nil {
-		// Convert Vault 403/404 errors to NoSecretError to prevent authentication storms
-		if isVaultMissingSecretError(err) {
-			return nil, esv1.NoSecretError{}
-		}
 		return nil, fmt.Errorf(errReadSecret, err)
 	}
 	if vaultSecret == nil {
@@ -219,10 +196,6 @@ func (c *client) readSecretMetadata(ctx context.Context, path string) (map[strin
 	secret, err := c.logical.ReadWithDataWithContext(ctx, url, nil)
 	metrics.ObserveAPICall(constants.ProviderHCVault, constants.CallHCVaultReadSecretData, err)
 	if err != nil {
-		// Convert Vault 403/404 errors to NoSecretError to prevent authentication storms
-		if isVaultMissingSecretError(err) {
-			return nil, nil // Return empty metadata for missing secrets
-		}
 		return nil, fmt.Errorf(errReadSecret, err)
 	}
 	if secret == nil {
